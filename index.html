@@ -406,6 +406,24 @@ footer {
       </div>
     </div>
 
+    <!-- Proxy CORS -->
+    <div class="section">
+      <div class="section-header">🛡️ Proxy CORS (opcional)</div>
+      <div class="section-body">
+        <div class="form-group">
+          <label>URL do Cloudflare Worker</label>
+          <input type="text" id="proxy-url" placeholder="https://meu-proxy.workers.dev">
+        </div>
+        <label class="radio-item" style="border:1px solid var(--border);border-radius:6px;padding:7px 10px;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:11px" id="proxy-toggle-wrap">
+          <input type="checkbox" id="proxy-toggle" style="cursor:pointer">
+          <span>Usar proxy para todos os streams</span>
+        </label>
+        <div style="font-size:10px;color:var(--text2);margin-top:6px;line-height:1.5">
+          Resolve CORS e mixed content. Veja aba <strong>Proxy</strong> sobre como hospedar.
+        </div>
+      </div>
+    </div>
+
     <!-- Fonte da lista -->
     <div class="section">
       <div class="section-header">⚙️ Fonte da Lista</div>
@@ -457,6 +475,7 @@ footer {
       <div class="tabs">
         <div class="tab active" data-tab="howto">📖 Como usar</div>
         <div class="tab" data-tab="format">📝 Formato da lista</div>
+        <div class="tab" data-tab="proxy">🛡️ Proxy</div>
         <div class="tab" data-tab="warnings">⚠️ Avisos técnicos</div>
         <div class="tab" data-tab="sources">🌐 Fontes públicas</div>
       </div>
@@ -490,6 +509,37 @@ US|NASA TV|https://...m3u8</pre>
         </div>
         <div class="info-block">
           <strong>Códigos de país:</strong> use ISO-3166 alpha-2 (AR, BR, US, UK, ES, MX, CL, UY...). A bandeira aparece automaticamente.
+        </div>
+      </div>
+
+      <div class="tab-content" id="tab-proxy">
+        <div class="info-block">
+          <strong>Para que serve:</strong> resolve dois problemas — <strong>CORS</strong> (quando o servidor IPTV não envia <code>Access-Control-Allow-Origin</code>) e <strong>mixed content</strong> (streams HTTP em página HTTPS).
+        </div>
+        <div class="info-block">
+          <strong>Como funciona:</strong> um Cloudflare Worker baixa o stream, adiciona os headers CORS, reescreve as URLs internas do manifest M3U8 (master → variants → segmentos .ts), e devolve tudo via HTTPS.
+        </div>
+        <div class="warn-block">
+          <strong>⚠ Custo de banda:</strong> 1h de vídeo HD ≈ 1GB transitando pelo Worker. O free tier do Cloudflare é 100k requests/dia (cada chunk .ts é 1 request, vídeo de 6s/chunk ≈ 600 requests/h). Use para sessões eventuais, não 24/7.
+        </div>
+        <div class="info-block">
+          <strong>Como hospedar (5 minutos):</strong>
+          <ol style="margin:8px 0 0 20px;line-height:1.8">
+            <li>Crie conta gratuita em <code>cloudflare.com</code></li>
+            <li>Vá em <strong>Workers & Pages → Create → Hello World</strong></li>
+            <li>Dê um nome (ex: <code>hls-proxy</code>) e clique <strong>Deploy</strong></li>
+            <li>Clique em <strong>Edit code</strong> e cole o conteúdo de <code>hls-proxy-worker.js</code></li>
+            <li>Clique <strong>Save and Deploy</strong></li>
+            <li>Copie a URL gerada (algo como <code>https://hls-proxy.SEU-USUARIO.workers.dev</code>)</li>
+            <li>Cole no campo <strong>URL do Cloudflare Worker</strong> aqui na esquerda</li>
+            <li>Marque <strong>Usar proxy</strong> e teste tocar o canal HTTP</li>
+          </ol>
+        </div>
+        <div class="info-block">
+          <strong>Restringir o Worker:</strong> abra <code>hls-proxy-worker.js</code> e troque <code>ALLOWED_ORIGINS = ['*']</code> por <code>['https://rmayormartins.github.io']</code> para evitar que outros usem seu Worker.
+        </div>
+        <div class="warn-block">
+          <strong>⚠ Limitações:</strong> não resolve <strong>geo-block</strong> (servidor IPTV vê o IP do datacenter Cloudflare, que provavelmente não é o país certo). Não resolve <strong>DRM</strong> (streams criptografados com chave externa). Para geo-block use VPN no seu lado.
         </div>
       </div>
 
@@ -802,22 +852,42 @@ function stopPlayer() {
   setStatus('Parado');
 }
 
+function buildProxiedUrl(url) {
+  const proxy = document.getElementById('proxy-url').value.trim().replace(/\/+$/, '');
+  const useProxy = document.getElementById('proxy-toggle').checked;
+  if (!useProxy || !proxy) return url;
+  return `${proxy}/?url=${encodeURIComponent(url)}`;
+}
+
 function playUrl(url) {
   const video = document.getElementById('video');
   if (state.hls) { state.hls.destroy(); state.hls = null; }
 
-  // Mixed content check
-  if (location.protocol === 'https:' && url.startsWith('http:')) {
+  const useProxy = document.getElementById('proxy-toggle').checked;
+  const proxy = document.getElementById('proxy-url').value.trim();
+
+  // Mixed content check (so se NAO estiver usando proxy)
+  if (!useProxy && location.protocol === 'https:' && url.startsWith('http:')) {
     showOverlay('⚠ Stream HTTP em página HTTPS — bloqueado pelo navegador');
-    setStatus('Mixed content: tente HTTPS ou abra a página localmente', 'error');
+    setStatus('Mixed content: ative o proxy ou abra a página localmente', 'error');
     document.getElementById('np-live').textContent = 'BLOQUEADO';
     return;
   }
 
-  showOverlay('Conectando ao stream...', true);
-  setStatus('Conectando: ' + url.slice(0, 40) + '...', 'running');
+  // Se proxy ativo mas sem URL, avisa
+  if (useProxy && !proxy) {
+    showOverlay('⚠ Proxy ativado mas URL do Worker está vazia');
+    setStatus('Configure a URL do Worker ou desative o proxy', 'error');
+    return;
+  }
 
-  const isHls = /\.m3u8(\?|$)/i.test(url);
+  const finalUrl = buildProxiedUrl(url);
+  if (useProxy) setStatus('Conectando via proxy...', 'running');
+  else setStatus('Conectando: ' + url.slice(0, 40) + '...', 'running');
+
+  showOverlay('Conectando ao stream...', true);
+
+  const isHls = /\.m3u8(\?|$)/i.test(url) || /\.m3u8/i.test(finalUrl);
 
   if (isHls && Hls.isSupported()) {
     const hls = new Hls({
@@ -827,19 +897,24 @@ function playUrl(url) {
       lowLatencyMode: false,
     });
     state.hls = hls;
-    hls.loadSource(url);
+    hls.loadSource(finalUrl);
     hls.attachMedia(video);
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
       hideOverlay();
       video.play().catch(e => console.warn('autoplay blocked:', e));
-      setStatus('✓ Stream conectado', 'ok');
+      setStatus(useProxy ? '✓ Stream conectado via proxy' : '✓ Stream conectado', 'ok');
       const live = document.getElementById('np-live');
-      live.textContent = 'AO VIVO'; live.className = 'np-live connected';
+      live.textContent = useProxy ? 'AO VIVO (PROXY)' : 'AO VIVO';
+      live.className = 'np-live connected';
     });
     hls.on(Hls.Events.ERROR, (_, data) => {
       if (data.fatal) {
         let msg = 'Erro fatal: ' + data.type + ' / ' + data.details;
-        if (data.details === 'manifestLoadError') msg = 'Não conseguiu baixar o manifest (CORS ou stream offline)';
+        if (data.details === 'manifestLoadError') {
+          msg = useProxy
+            ? 'Proxy não respondeu ou stream offline'
+            : 'Não conseguiu baixar o manifest (CORS ou stream offline) — tente ativar o proxy';
+        }
         if (data.details === 'manifestParsingError') msg = 'Manifest inválido';
         showOverlay('❌ ' + msg);
         setStatus(msg, 'error');
@@ -849,7 +924,7 @@ function playUrl(url) {
     });
   } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
     // Safari nativo
-    video.src = url;
+    video.src = finalUrl;
     video.addEventListener('loadedmetadata', () => {
       hideOverlay();
       video.play().catch(()=>{});
@@ -862,8 +937,8 @@ function playUrl(url) {
       setStatus('Erro ao carregar', 'error');
     }, { once: true });
   } else {
-    // Fallback: tenta como vídeo direto (mp4, etc)
-    video.src = url;
+    // Fallback: tenta como video direto (mp4, etc)
+    video.src = finalUrl;
     video.addEventListener('loadedmetadata', () => {
       hideOverlay();
       video.play().catch(()=>{});
@@ -882,8 +957,25 @@ function playUrl(url) {
 // INIT
 // ===================================================
 window.addEventListener('DOMContentLoaded', () => {
-  // Pré-popula com o link que voce passou para teste
+  // Pre-popula com o link que voce passou para teste
   document.getElementById('manual-url').value = 'http://190.104.226.30/Live/870787012c00961adaf9b2304d704b57/telefe_720.m3u8';
+
+  // Restaura config do proxy (se ja foi configurado antes)
+  try {
+    const savedProxy = localStorage.getItem('iptvlab.proxy.url');
+    const savedToggle = localStorage.getItem('iptvlab.proxy.enabled');
+    if (savedProxy) document.getElementById('proxy-url').value = savedProxy;
+    if (savedToggle === '1') document.getElementById('proxy-toggle').checked = true;
+  } catch {}
+
+  // Salva config do proxy quando muda
+  document.getElementById('proxy-url').addEventListener('change', e => {
+    try { localStorage.setItem('iptvlab.proxy.url', e.target.value.trim()); } catch {}
+  });
+  document.getElementById('proxy-toggle').addEventListener('change', e => {
+    try { localStorage.setItem('iptvlab.proxy.enabled', e.target.checked ? '1' : '0'); } catch {}
+  });
+
   loadChannelList();
 });
 </script>
