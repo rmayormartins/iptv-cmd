@@ -1,0 +1,29 @@
+# =====================================================
+# Lista de canais IPTV.lab
+# Formato: PAIS|NOME|URL  (separado por barras verticais |)
+# Use codigos ISO-3166 alpha-2 para o pais (AR, BR, US...)
+# Linhas comecando com # sao ignoradas
+# =====================================================
+
+# --- ARGENTINA ---
+# Atencao: o link abaixo e HTTP. Nao vai tocar em pagina HTTPS (GitHub Pages).
+# Para tocar Telefe via HTTPS, considere usar a lista oficial do iptv-org.
+AR|Telefe (HTTP - so funciona local)|http://190.104.226.30/Live/870787012c00961adaf9b2304d704b57/telefe_720.m3u8
+
+# Para uma lista atualizada da Argentina, aponte o campo "Fonte da Lista" para:
+# https://iptv-org.github.io/iptv/countries/ar.m3u
+
+# --- ESTADOS UNIDOS (HTTPS - testa se a interface funciona) ---
+US|NASA TV Public|https://ntv1.akamaized.net/hls/live/2014075/NASA-NTV1-HLS/master.m3u8
+US|Red Bull TV|https://rbmn-live.akamaized.net/hls/live/590964/BoRB-AT/master.m3u8
+
+# --- BRASIL (exemplos - confira se ainda funcionam) ---
+# BR|TV Brasil|https://...
+# BR|TV Cultura|https://...
+
+# =====================================================
+# Como adicionar mais canais:
+# 1. Edite este arquivo direto pelo GitHub
+# 2. Faca commit
+# 3. Clique em "Recarregar" no painel da pagina
+# =====================================================
